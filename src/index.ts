@@ -190,7 +190,7 @@ export class Swap {
     return didSwapEvent.toAmount;
   }
 
-  private async swapIxs(
+  public async swapIxs(
     params: SwapParams,
   ): Promise<[TransactionInstruction[], Account[]]> {
     let {

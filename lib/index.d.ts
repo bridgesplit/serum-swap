@@ -1,7 +1,7 @@
 import BN from 'bn.js';
 import { PublicKey, TransactionSignature, Connection } from '@solana/web3.js';
 import { Program, Provider } from '@project-serum/anchor';
-import { ConfirmOptions } from '@solana/web3.js';
+import { Account, TransactionInstruction, ConfirmOptions } from '@solana/web3.js';
 import { Market } from '@project-serum/serum';
 /**
  *
@@ -126,7 +126,7 @@ export declare class Swap {
      * from making unexpected trades.
      */
     estimate(params: EstimateSwapParams): Promise<BN>;
-    private swapIxs;
+    swapIxs(params: SwapParams): Promise<[TransactionInstruction[], Account[]]>;
     private swapDirectIxs;
     address(connection: Connection, address: any, opts: ConfirmOptions, DEX_PID: PublicKey): void;
 }
