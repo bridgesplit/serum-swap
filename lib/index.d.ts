@@ -1,6 +1,6 @@
 import BN from 'bn.js';
 import { PublicKey, TransactionSignature, Connection } from '@solana/web3.js';
-import { Provider } from '@project-serum/anchor';
+import { Program, Provider } from '@project-serum/anchor';
 import { ConfirmOptions } from '@solana/web3.js';
 import { Market } from '@project-serum/serum';
 /**
@@ -102,7 +102,7 @@ export declare class Swap {
     /**
      * Anchor generated client for the swap program.
      */
-    private program;
+    program: Program;
     swapMarkets: any;
     /**
      * @param provider  The wallet and network context to use for the client.

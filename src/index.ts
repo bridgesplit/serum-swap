@@ -125,7 +125,7 @@ export class Swap {
   /**
    * Anchor generated client for the swap program.
    */
-  private program: Program;
+  public program: Program;
   swapMarkets: any;
 
   /**
