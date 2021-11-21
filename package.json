@@ -1,9 +1,9 @@
 {
-  "name": "@project-serum/swap",
+  "name": "@bridgesplit/serum-swap",
   "version": "0.1.0-alpha.1",
   "description": "Client for swapping on the Serum DEX",
   "license": "MIT",
-  "repository": "project-serum/serum-ts",
+  "repository": "bridgesplit/serum-swap",
   "main": "lib/index.js",
   "source": "src/index.js",
   "types": "lib/index.d.ts",
