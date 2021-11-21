@@ -19,19 +19,6 @@ async function main() {
   // Client for sending transactions to the swap program on mainnet.
   const client = await swapClient();
 
-  // All tokens available for swapping.
-  const _tokens = client.tokens();
-
-  // All tokens available for swapping with SRM.
-  const _srmSwapPairs = client.pairs(SRM);
-
-  // Estimate the amount received by swapping from SRM -> USDC.
-  const estimatedUsdc = await client.estimate({
-    fromMint: SRM,
-    toMint: USDC,
-    amount: toNative(1),
-  });
-
   const estimatedBtc = await client.estimate({
     fromMint: SRM,
     toMint: WBTC,

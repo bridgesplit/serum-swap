@@ -174,6 +174,7 @@ export class Swap {
       params.options,
     );
     if (resp === undefined || resp.value.err || !resp.value.logs) {
+      console.log(resp)
       throw new Error('Unable to simulate swap');
     }
 
@@ -412,13 +413,6 @@ export type SwapParams = {
    * quote currency of the trade.
    */
   referral?: PublicKey;
-
-  /**
-   * Wallet of the quote currency to use in a transitive swap. Should be either
-   * a USDC or USDT wallet. If not provided uses an associated token address
-   * for the configured provider.
-   */
-  quoteWallet?: PublicKey;
 
   /**
    * Wallet for `fromMint`. If not provided, uses an associated token address

@@ -186,12 +186,6 @@ export declare type SwapParams = {
      */
     referral?: PublicKey;
     /**
-     * Wallet of the quote currency to use in a transitive swap. Should be either
-     * a USDC or USDT wallet. If not provided uses an associated token address
-     * for the configured provider.
-     */
-    quoteWallet?: PublicKey;
-    /**
      * Wallet for `fromMint`. If not provided, uses an associated token address
      * for the configured provider.
      */
