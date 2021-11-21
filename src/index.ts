@@ -4,6 +4,7 @@ import {
   Transaction,
   TransactionSignature,
   SYSVAR_RENT_PUBKEY,
+  Connection,
 } from '@solana/web3.js';
 import { Program, Provider } from '@project-serum/anchor';
 import { TokenListContainer } from '@solana/spl-token-registry';
@@ -22,12 +23,9 @@ import { IDL } from './idl';
 import {
   DEX_PID,
   SWAP_PID,
-  USDC_PUBKEY,
-  USDT_PUBKEY,
   getVaultOwnerAndNonce,
   getAssociatedTokenAddress,
 } from './utils';
-import SwapMarkets from './swap-markets';
 
 /**
  *
@@ -129,11 +127,7 @@ export class Swap {
    * Anchor generated client for the swap program.
    */
   private program: Program;
-
-  /**
-   * Token list registry for fetching USD(x) markets for each mint.
-   */
-  private swapMarkets: SwapMarkets;
+  swapMarkets: any;
 
   /**
    * @param provider  The wallet and network context to use for the client.
@@ -141,356 +135,6 @@ export class Swap {
    */
   constructor(provider: Provider, tokenList: TokenListContainer) {
     this.program = new Program(IDL, SWAP_PID, provider);
-    this.swapMarkets = new SwapMarkets(provider, tokenList);
-  }
-
-  /**
-   * Returns a list of all the available tokens that can be swapped. This
-   * includes all tokens with USDC or USDT quoted markets.
-   *
-   * To update the set of swappable tokens, please update the
-   * [`@solana/spl-token-registry`](https://github.com/solana-labs/token-list)
-   * package to list the USD(x) markets available for each token mint.
-   */
-  public tokens(): PublicKey[] {
-    return this.swapMarkets.tokens();
-  }
-
-  /**
-   * Given a token, returns the list of all candidate tokens that can be
-   * swapped with the given token. This is important, because, in order for a
-   * swap to be available, there must exist a path across a USD(x) quoted
-   * market.
-   *
-   * To swap across alternative quote currencies, one should use the Anchor
-   * generated client directly (although it's recommended to trade
-   * across USD(x)) since they tend to be the most liquid.
-   */
-  public pairs(mint: PublicKey): PublicKey[] {
-    return this.swapMarkets.pairs(mint);
-  }
-
-  /**
-   * Sends a transaction to initialize all accounts required for a swap between
-   * the two mints. I.e., creates the DEX open orders accounts.
-   *
-   * @throws if all open orders accounts already exist.
-   */
-  public async initAccounts(
-    params: InitSwapAccountParams,
-  ): Promise<TransactionSignature> {
-    const { fromMint, toMint } = params;
-
-    const signers: Account[] = [];
-    const tx = new Transaction();
-
-    // Direct swap on USD(x).
-    if (fromMint.equals(USDC_PUBKEY) || fromMint.equals(USDT_PUBKEY)) {
-      const openOrders = new Account();
-      const marketAddress = await this.swapMarkets.getMarketAddressIfNeeded(
-        fromMint,
-        toMint,
-      );
-      tx.add(
-        await OpenOrders.makeCreateAccountTransaction(
-          this.program.provider.connection,
-          marketAddress,
-          this.program.provider.wallet.publicKey,
-          openOrders.publicKey,
-          DEX_PID,
-        ),
-      );
-      signers.push(openOrders);
-      tx.add(
-        this.program.instruction.initAccount({
-          accounts: {
-            openOrders: openOrders.publicKey,
-            authority: this.program.provider.wallet.publicKey,
-            market: marketAddress,
-            dexProgram: DEX_PID,
-            rent: SYSVAR_RENT_PUBKEY,
-          },
-        }),
-      );
-    }
-    // Direct swap on USD(x).
-    else if (toMint.equals(USDC_PUBKEY) || toMint.equals(USDT_PUBKEY)) {
-      const openOrders = new Account();
-      const marketAddress = await this.swapMarkets.getMarketAddressIfNeeded(
-        toMint,
-        fromMint,
-      );
-      tx.add(
-        await OpenOrders.makeCreateAccountTransaction(
-          this.program.provider.connection,
-          marketAddress,
-          this.program.provider.wallet.publicKey,
-          openOrders.publicKey,
-          DEX_PID,
-        ),
-      );
-      tx.add(
-        this.program.instruction.initAccount({
-          accounts: {
-            openOrders: openOrders.publicKey,
-            authority: this.program.provider.wallet.publicKey,
-            market: marketAddress,
-            dexProgram: DEX_PID,
-            rent: SYSVAR_RENT_PUBKEY,
-          },
-        }),
-      );
-      signers.push(openOrders);
-    }
-    // Transitive swap across USD(x).
-    else {
-      // Builds the instructions for initializing open orders for a transitive
-      // swap.
-      const tryBuildTransitive = async (
-        usdx: PublicKey,
-      ): Promise<[Array<TransactionInstruction>, Array<Account>]> => {
-        // Instructions and signers to build.
-        const ixs: Array<TransactionInstruction> = [];
-        const sigs: Array<Account> = [];
-
-        // Markets.
-        const marketFrom = await this.swapMarkets.getMarketAddress(
-          usdx,
-          fromMint,
-        );
-        const marketTo = await this.swapMarkets.getMarketAddress(usdx, toMint);
-
-        // Open orders accounts (already existing).
-        const ooAccsFrom = await OpenOrders.findForMarketAndOwner(
-          this.program.provider.connection,
-          marketFrom,
-          this.program.provider.wallet.publicKey,
-          DEX_PID,
-        );
-        const ooAccsTo = await OpenOrders.findForMarketAndOwner(
-          this.program.provider.connection,
-          marketTo,
-          this.program.provider.wallet.publicKey,
-          DEX_PID,
-        );
-
-        if (ooAccsFrom[0] && ooAccsTo[0]) {
-          throw new Error('Open orders already exist');
-        }
-
-        // No open orders account for the from market, so make it.
-        if (!ooAccsFrom[0]) {
-          const ooFrom = new Account();
-          ixs.push(
-            await OpenOrders.makeCreateAccountTransaction(
-              this.program.provider.connection,
-              marketFrom,
-              this.program.provider.wallet.publicKey,
-              ooFrom.publicKey,
-              DEX_PID,
-            ),
-          );
-          ixs.push(
-            this.program.instruction.initAccount({
-              accounts: {
-                openOrders: ooFrom.publicKey,
-                authority: this.program.provider.wallet.publicKey,
-                market: marketFrom,
-                dexProgram: DEX_PID,
-                rent: SYSVAR_RENT_PUBKEY,
-              },
-            }),
-          );
-          sigs.push(ooFrom);
-        }
-
-        // No open orders account for the to market, so make it.
-        if (!ooAccsTo[0]) {
-          const ooTo = new Account();
-          ixs.push(
-            await OpenOrders.makeCreateAccountTransaction(
-              this.program.provider.connection,
-              marketTo,
-              this.program.provider.wallet.publicKey,
-              ooTo.publicKey,
-              DEX_PID,
-            ),
-          );
-          ixs.push(
-            this.program.instruction.initAccount({
-              accounts: {
-                openOrders: ooTo.publicKey,
-                authority: this.program.provider.wallet.publicKey,
-                market: marketTo,
-                dexProgram: DEX_PID,
-                rent: SYSVAR_RENT_PUBKEY,
-              },
-            }),
-          );
-          sigs.push(ooTo);
-        }
-
-        // Done.
-        return [ixs, sigs];
-      };
-
-      try {
-        // Try USDC.
-        const [ixs, sigs] = await tryBuildTransitive(USDC_PUBKEY);
-        tx.add(...ixs);
-        signers.push(...sigs);
-      } catch (err) {
-        // USDC path doesn't exist. Try USDT.
-        const [ixs, sigs] = await tryBuildTransitive(USDT_PUBKEY);
-        tx.add(...ixs);
-        signers.push(...sigs);
-      }
-    }
-
-    // Send the constructed transaction to the cluster.
-    return await this.program.provider.send(tx, signers);
-  }
-
-  /**
-   * Sends a transaction to close all accounts required for a swap transaction,
-   * i.e., all currently open DEX open orders accounts for the given `fromMint`
-   * `toMint` swap path.
-   *
-   * @throws if no open orders accounts exist.
-   */
-  public async closeAccounts(
-    params: CloseSwapAccountParams,
-  ): Promise<TransactionSignature> {
-    const { fromMint, toMint } = params;
-    const tx = new Transaction();
-    if (fromMint.equals(USDC_PUBKEY) || fromMint.equals(USDT_PUBKEY)) {
-      const marketAddress = await this.swapMarkets.getMarketAddress(
-        fromMint,
-        toMint,
-      );
-      const ooAccounts = await OpenOrders.findForMarketAndOwner(
-        this.program.provider.connection,
-        marketAddress,
-        this.program.provider.wallet.publicKey,
-        DEX_PID,
-      );
-      if (!ooAccounts[0]) {
-        throw new Error(`Open orders account doesn't exist`);
-      }
-      tx.add(
-        this.program.instruction.closeAccount({
-          accounts: {
-            openOrders: ooAccounts[0].publicKey,
-            authority: this.program.provider.wallet.publicKey,
-            destination: this.program.provider.wallet.publicKey,
-            market: marketAddress,
-            dexProgram: DEX_PID,
-          },
-        }),
-      );
-    } else if (toMint.equals(USDC_PUBKEY) || toMint.equals(USDT_PUBKEY)) {
-      const marketAddress = await this.swapMarkets.getMarketAddress(
-        toMint,
-        fromMint,
-      );
-      const ooAccounts = await OpenOrders.findForMarketAndOwner(
-        this.program.provider.connection,
-        marketAddress,
-        this.program.provider.wallet.publicKey,
-        DEX_PID,
-      );
-      if (!ooAccounts[0]) {
-        throw new Error(`Open orders account doesn't exist`);
-      }
-      tx.add(
-        this.program.instruction.closeAccount({
-          accounts: {
-            openOrders: ooAccounts[0].publicKey,
-            authority: this.program.provider.wallet.publicKey,
-            destination: this.program.provider.wallet.publicKey,
-            market: marketAddress,
-            dexProgram: DEX_PID,
-          },
-        }),
-      );
-    } else {
-      const tryBuildTransitive = async (
-        usdx: PublicKey,
-      ): Promise<Array<TransactionInstruction>> => {
-        // Instructions and signers to build.
-        const ixs: Array<TransactionInstruction> = [];
-        const sigs: Array<Account> = [];
-
-        // Markets.
-        const marketFrom = await this.swapMarkets.getMarketAddress(
-          usdx,
-          fromMint,
-        );
-        const marketTo = await this.swapMarkets.getMarketAddress(usdx, toMint);
-
-        // Open orders accounts (already existing).
-        const ooAccsFrom = await OpenOrders.findForMarketAndOwner(
-          this.program.provider.connection,
-          marketFrom,
-          this.program.provider.wallet.publicKey,
-          DEX_PID,
-        );
-        const ooAccsTo = await OpenOrders.findForMarketAndOwner(
-          this.program.provider.connection,
-          marketTo,
-          this.program.provider.wallet.publicKey,
-          DEX_PID,
-        );
-
-        if (!ooAccsFrom[0] && !ooAccsTo[0]) {
-          throw new Error(`No open orders accounts left to close`);
-        }
-
-        // Close the from market open orders account, if it exists.
-        if (ooAccsFrom[0]) {
-          ixs.push(
-            this.program.instruction.closeAccount({
-              accounts: {
-                openOrders: ooAccsFrom[0].publicKey,
-                authority: this.program.provider.wallet.publicKey,
-                destination: this.program.provider.wallet.publicKey,
-                market: marketFrom,
-                dexProgram: DEX_PID,
-              },
-            }),
-          );
-        }
-
-        // Close the to market open orders account, if it exists.
-        if (ooAccsTo[0]) {
-          ixs.push(
-            this.program.instruction.closeAccount({
-              accounts: {
-                openOrders: ooAccsTo[0].publicKey,
-                authority: this.program.provider.wallet.publicKey,
-                destination: this.program.provider.wallet.publicKey,
-                market: marketTo,
-                dexProgram: DEX_PID,
-              },
-            }),
-          );
-        }
-
-        return ixs;
-      };
-      try {
-        // Try USDC.
-        const ixs = await tryBuildTransitive(USDC_PUBKEY);
-        tx.add(...ixs);
-      } catch (err) {
-        // USDC path doesn't exist. Try USDT.
-        const ixs = await tryBuildTransitive(USDT_PUBKEY);
-        tx.add(...ixs);
-      }
-    }
-
-    // Send the constructed transaction to the cluster.
-    return await this.program.provider.send(tx);
   }
 
   /**
@@ -558,6 +202,7 @@ export class Swap {
       fromWallet,
       toWallet,
       amount,
+      market,
       minExpectedSwapAmount,
       referral,
     } = params;
@@ -588,7 +233,6 @@ export class Swap {
     }
 
     // If swapping to/from a USD(x) token, then swap directly on the market.
-    if (fromMint.equals(USDC_PUBKEY) || fromMint.equals(USDT_PUBKEY)) {
       return await this.swapDirectIxs({
         coinWallet: toWallet,
         pcWallet: fromWallet,
@@ -596,50 +240,10 @@ export class Swap {
         quoteMint: fromMint,
         side: Side.Bid,
         amount,
+        market,
         minExpectedSwapAmount,
         referral,
       });
-    } else if (toMint.equals(USDC_PUBKEY) || toMint.equals(USDT_PUBKEY)) {
-      return await this.swapDirectIxs({
-        coinWallet: fromWallet,
-        pcWallet: toWallet,
-        baseMint: fromMint,
-        quoteMint: toMint,
-        side: Side.Ask,
-        amount,
-        minExpectedSwapAmount,
-        referral,
-      });
-    }
-
-    // Neither wallet is a USD stable coin. So perform a transitive swap.
-    if (!quoteWallet) {
-      if (this.swapMarkets.usdcPathExists(fromMint, toMint)) {
-        quoteWallet = await getAssociatedTokenAddress(
-          ASSOCIATED_TOKEN_PROGRAM_ID,
-          TOKEN_PROGRAM_ID,
-          USDC_PUBKEY,
-          this.program.provider.wallet.publicKey,
-        );
-      } else {
-        quoteWallet = await getAssociatedTokenAddress(
-          ASSOCIATED_TOKEN_PROGRAM_ID,
-          TOKEN_PROGRAM_ID,
-          USDT_PUBKEY,
-          this.program.provider.wallet.publicKey,
-        );
-      }
-    }
-    return await this.swapTransitiveIxs({
-      fromMint,
-      toMint,
-      fromWallet,
-      toWallet,
-      pcWallet: quoteWallet,
-      amount,
-      minExpectedSwapAmount,
-      referral,
-    });
   }
 
   private async swapDirectIxs({
@@ -649,6 +253,7 @@ export class Swap {
     quoteMint,
     side,
     amount,
+    market,
     minExpectedSwapAmount,
     referral,
   }: {
@@ -658,15 +263,11 @@ export class Swap {
     quoteMint: PublicKey;
     side: SideEnum;
     amount: BN;
+    market: Market;
     minExpectedSwapAmount: BN;
     referral?: PublicKey;
   }): Promise<[TransactionInstruction[], Account[]]> {
-    const marketClient = await Market.load(
-      this.program.provider.connection,
-      this.swapMarkets.getMarketAddress(quoteMint, baseMint),
-      this.program.provider.opts,
-      DEX_PID,
-    );
+    const marketClient = await Market.load( this.program.provider.connection, market.address, this.program.provider.opts, DEX_PID);
     const [vaultSigner] = await getVaultOwnerAndNonce(marketClient.address);
     let openOrders = await (async () => {
       let openOrders = await OpenOrders.findForMarketAndOwner(
@@ -750,168 +351,8 @@ export class Swap {
 
     return [ixs, signers];
   }
-
-  private async swapTransitiveIxs({
-    fromMint,
-    toMint,
-    fromWallet,
-    toWallet,
-    pcWallet,
-    amount,
-    minExpectedSwapAmount,
-    referral,
-  }: {
-    fromMint: PublicKey;
-    toMint: PublicKey;
-    fromWallet: PublicKey;
-    toWallet: PublicKey;
-    pcWallet: PublicKey;
-    amount: BN;
-    minExpectedSwapAmount: BN;
-    referral?: PublicKey;
-  }): Promise<[TransactionInstruction[], Account[]]> {
-    let fromMarket: PublicKey, toMarket: PublicKey;
-    try {
-      // Try USDC path.
-      fromMarket = this.swapMarkets.getMarketAddress(USDC_PUBKEY, fromMint);
-      toMarket = this.swapMarkets.getMarketAddress(USDC_PUBKEY, toMint);
-    } catch (err) {
-      // USDC path doesn't exist. Try USDT.
-      fromMarket = this.swapMarkets.getMarketAddress(USDT_PUBKEY, fromMint);
-      toMarket = this.swapMarkets.getMarketAddress(USDT_PUBKEY, toMint);
-    }
-    const [fromMarketClient, toMarketClient] = await Promise.all([
-      Market.load(
-        this.program.provider.connection,
-        fromMarket,
-        this.program.provider.opts,
-        DEX_PID,
-      ),
-      Market.load(
-        this.program.provider.connection,
-        toMarket,
-        this.program.provider.opts,
-        DEX_PID,
-      ),
-    ]);
-    const [fromVaultSigner] = await getVaultOwnerAndNonce(
-      fromMarketClient.address,
-    );
-    const [toVaultSigner] = await getVaultOwnerAndNonce(toMarketClient.address);
-    const [fromOpenOrders, toOpenOrders] = await (async () => {
-      let [fromOpenOrders, toOpenOrders] = await Promise.all([
-        OpenOrders.findForMarketAndOwner(
-          this.program.provider.connection,
-          fromMarketClient.address,
-          this.program.provider.wallet.publicKey,
-          DEX_PID,
-        ),
-        OpenOrders.findForMarketAndOwner(
-          this.program.provider.connection,
-          toMarketClient.address,
-          this.program.provider.wallet.publicKey,
-          DEX_PID,
-        ),
-      ]);
-      // If we have an open orders account use it. It doesn't matter which
-      // one we use.
-      return [
-        fromOpenOrders[0] ? fromOpenOrders[0].address : undefined,
-        toOpenOrders[0] ? toOpenOrders[0].address : undefined,
-      ];
-    })();
-    const fromNeedsOpenOrders = fromOpenOrders === undefined;
-    const toNeedsOpenOrders = toOpenOrders === undefined;
-
-    const ixs: TransactionInstruction[] = [];
-    const signers: Account[] = [];
-
-    // Add instruction to batch create all open orders accounts, if needed.
-    let accounts: Account[] = [];
-    if (fromNeedsOpenOrders || true) {
-      const oo = new Account();
-      signers.push(oo);
-      accounts.push(oo);
-    }
-    if (toNeedsOpenOrders || true) {
-      const oo = new Account();
-      signers.push(oo);
-      accounts.push(oo);
-    }
-    if (fromNeedsOpenOrders || toNeedsOpenOrders || true) {
-      let remainingAccounts = accounts.map((a) => {
-        return {
-          pubkey: a.publicKey,
-          isSigner: true,
-          isWritable: true,
-        };
-      });
-      const openOrdersSize = 200;
-      const lamports = new BN(
-        await this.program.provider.connection.getMinimumBalanceForRentExemption(
-          openOrdersSize,
-        ),
-      );
-      // ixs.push(
-      // 	this.createAccountsProgram.instruction.createAccounts({
-      // 		accounts: {
-      // 			funding: this.program.provider.wallet.publicKey,
-      // 			owner: DEX_PID,
-      // 			systemProgram: SystemProgram.programId,
-      // 		},
-      // 		remainingAccounts,
-      // 	}),
-      // );
-    }
-
-    ixs.push(
-      this.program.instruction.swapTransitive(amount, minExpectedSwapAmount, {
-        accounts: {
-          from: {
-            market: fromMarketClient.address,
-            // @ts-ignore
-            requestQueue: fromMarketClient._decoded.requestQueue,
-            // @ts-ignore
-            eventQueue: fromMarketClient._decoded.eventQueue,
-            bids: fromMarketClient.bidsAddress,
-            asks: fromMarketClient.asksAddress,
-            // @ts-ignore
-            coinVault: fromMarketClient._decoded.baseVault,
-            // @ts-ignore
-            pcVault: fromMarketClient._decoded.quoteVault,
-            vaultSigner: fromVaultSigner,
-            openOrders: fromOpenOrders,
-            orderPayerTokenAccount: fromWallet,
-            coinWallet: fromWallet,
-          },
-          to: {
-            market: toMarketClient.address,
-            // @ts-ignore
-            requestQueue: toMarketClient._decoded.requestQueue,
-            // @ts-ignore
-            eventQueue: toMarketClient._decoded.eventQueue,
-            bids: toMarketClient.bidsAddress,
-            asks: toMarketClient.asksAddress,
-            // @ts-ignore
-            coinVault: toMarketClient._decoded.baseVault,
-            // @ts-ignore
-            pcVault: toMarketClient._decoded.quoteVault,
-            vaultSigner: toVaultSigner,
-            openOrders: toOpenOrders,
-            orderPayerTokenAccount: pcWallet,
-            coinWallet: toWallet,
-          },
-          pcWallet,
-          authority: this.program.provider.wallet.publicKey,
-          dexProgram: DEX_PID,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          rent: SYSVAR_RENT_PUBKEY,
-        },
-        remainingAccounts: referral && [referral],
-      }),
-    );
-
-    return [ixs, signers];
+  address(connection: Connection, address: any, opts: ConfirmOptions, DEX_PID: PublicKey) {
+    throw new Error('Method not implemented.');
   }
 }
 
@@ -962,6 +403,11 @@ export type SwapParams = {
    */
   amount: BN;
 
+
+
+  market: Market;
+
+
   /**
    * The minimum number of `toMint` tokens one should receive for the swap. This
    * is a safety mechanism to prevent one from performing an unexpecteed trade.
@@ -994,6 +440,7 @@ export type SwapParams = {
    * for the configured provider.
    */
   toWallet?: PublicKey;
+
 
   /**
    * RPC options. If not given the options on the program's provider are used.

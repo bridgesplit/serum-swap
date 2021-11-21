@@ -1,24 +1,14 @@
 import BN from 'bn.js';
 import { PublicKey } from '@solana/web3.js';
 
-// Serum DEX program id on mainnet-beta.
+// Serum DEX program id on devnet.
 export const DEX_PID = new PublicKey(
-  '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin',
+  'DESVgJVGajEgKGXhb6XmqDHGz3VjdgP7rEVESBgxmroY',
 );
 
-// Swap program id on mainnet-beta.
+// Swap program id on devnet.
 export const SWAP_PID = new PublicKey(
-  '22Y43yTVxuUkoRKdm9thyRhQ3SdgQS7c7kB6UNCiaczD',
-);
-
-// USDC mint on mainnet-beta.
-export const USDC_PUBKEY = new PublicKey(
-  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-);
-
-// USDT mint on mainnet-beta.
-export const USDT_PUBKEY = new PublicKey(
-  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+  'ziR2PGyshLYwLsGsH5hXH5rkZTf6GNJ6RzvX23v52iY',
 );
 
 // Return the program derived address used by the serum DEX to control token
