@@ -7,7 +7,6 @@ import {
   Connection,
 } from '@solana/web3.js';
 import { Program, Provider } from '@project-serum/anchor';
-import { TokenListContainer } from '@solana/spl-token-registry';
 import {
   Account,
   TransactionInstruction,
@@ -131,9 +130,8 @@ export class Swap {
 
   /**
    * @param provider  The wallet and network context to use for the client.
-   * @param tokenList The token list providing market addresses for each mint.
    */
-  constructor(provider: Provider, tokenList: TokenListContainer) {
+  constructor(provider: Provider) {
     this.program = new Program(IDL, SWAP_PID, provider);
   }
 

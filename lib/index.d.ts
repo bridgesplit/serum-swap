@@ -1,7 +1,6 @@
 import BN from 'bn.js';
 import { PublicKey, TransactionSignature, Connection } from '@solana/web3.js';
 import { Provider } from '@project-serum/anchor';
-import { TokenListContainer } from '@solana/spl-token-registry';
 import { ConfirmOptions } from '@solana/web3.js';
 import { Market } from '@project-serum/serum';
 /**
@@ -107,9 +106,8 @@ export declare class Swap {
     swapMarkets: any;
     /**
      * @param provider  The wallet and network context to use for the client.
-     * @param tokenList The token list providing market addresses for each mint.
      */
-    constructor(provider: Provider, tokenList: TokenListContainer);
+    constructor(provider: Provider);
     /**
      * Executes a swap against the Serum DEX on Solana. When using one should
      * first use `estimate` along with a user defined error tolerance to calculate
