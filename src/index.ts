@@ -196,7 +196,6 @@ export class Swap {
     let {
       fromMint,
       toMint,
-      quoteWallet,
       fromWallet,
       toWallet,
       amount,
@@ -234,8 +233,6 @@ export class Swap {
       return await this.swapDirectIxs({
         coinWallet: toWallet,
         pcWallet: fromWallet,
-        baseMint: toMint,
-        quoteMint: fromMint,
         side: Side.Bid,
         amount,
         market,
@@ -247,8 +244,6 @@ export class Swap {
   private async swapDirectIxs({
     coinWallet,
     pcWallet,
-    baseMint,
-    quoteMint,
     side,
     amount,
     market,
@@ -257,8 +252,6 @@ export class Swap {
   }: {
     coinWallet: PublicKey;
     pcWallet: PublicKey;
-    baseMint: PublicKey;
-    quoteMint: PublicKey;
     side: SideEnum;
     amount: BN;
     market: Market;
